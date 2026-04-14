@@ -39,10 +39,8 @@ def admin_panel(message):
         text = "⚙️ ADMIN PANEL\n\nMajburiy kanallar:\n"
         for ch in CHANNELS:
             text += f"🔹 {ch}\n"
-
         text += "\n➕ Qo'shish: /add @kanal"
         text += "\n➖ O'chirish: /del @kanal"
-
         bot.send_message(message.chat.id, text)
 
 # 5. KANAL QO‘SHISH
@@ -51,14 +49,11 @@ def add_channel(message):
     if message.from_user.id == ADMIN_ID:
         try:
             new_ch = message.text.split()[1]
-
             if new_ch not in CHANNELS:
                 CHANNELS.append(new_ch)
                 bot.reply_to(message, f"✅ {new_ch} qo'shildi!")
-
             else:
                 bot.reply_to(message, "Bu kanal allaqachon mavjud.")
-
         except:
             bot.reply_to(message, "Xato! /add @kanal shaklida yozing.")
 
@@ -68,14 +63,11 @@ def del_channel(message):
     if message.from_user.id == ADMIN_ID:
         try:
             ch = message.text.split()[1]
-
             if ch in CHANNELS:
                 CHANNELS.remove(ch)
                 bot.reply_to(message, f"❌ {ch} olib tashlandi!")
-
             else:
                 bot.reply_to(message, "Bu kanal ro'yxatda yo'q.")
-
         except:
             bot.reply_to(message, "Xato! /del @kanal shaklida yozing.")
 
@@ -84,24 +76,36 @@ def del_channel(message):
 def start(message):
     bot.send_message(message.chat.id, "🎬 Salom! Kino kodini yuboring.")
 
-# 8. KINO YUBORISH
+# --- YANGI QO'SHILGAN QISM: TASDIQLASH TUGMASI BOSILGANDA ---
+@bot.callback_query_handler(func=lambda call: call.data == "check_sub")
+def check_callback(call):
+    if check_sub(call.from_user.id):
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+        bot.send_message(call.message.chat.id, "✅ Rahmat! Endi kino kodini yuborishingiz mumkin.")
+    else:
+        bot.answer_callback_query(call.id, "❌ Siz hali hamma kanallarga a'zo bo'lmadingiz!", show_alert=True)
+
+# 8. KINO YUBORISH (Tugmalar shu yerda to'g'rilandi)
 @bot.message_handler(func=lambda m: True)
 def get_kino(message):
-
     if not check_sub(message.from_user.id):
         btn = telebot.types.InlineKeyboardMarkup()
-
+        
+        # Har bir kanal uchun alohida tugma
         for ch in CHANNELS:
             btn.add(
                 telebot.types.InlineKeyboardButton(
-                    text="A'zo bo'lish",
+                    text=f"A'zo bo'lish ({ch})",
                     url=f"https://t.me/{ch[1:]}"
                 )
             )
+        
+        # Tasdiqlash tugmasini qo'shish
+        btn.add(telebot.types.InlineKeyboardButton(text="✅ Tasdiqlash", callback_data="check_sub"))
 
         bot.send_message(
             message.chat.id,
-            "❌ Kanalga a'zo bo'ling!",
+            "❌ Botdan foydalanish uchun quyidagi kanallarga a'zo bo'ling va 'Tasdiqlash' tugmasini bosing:",
             reply_markup=btn
         )
         return
@@ -113,7 +117,6 @@ def get_kino(message):
                 KINO_KANAL_ID,
                 int(message.text)
             )
-
         except:
             bot.send_message(message.chat.id, "😔 Kino topilmadi.")
 
