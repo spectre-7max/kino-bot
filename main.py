@@ -5,7 +5,7 @@ from threading import Thread
 import os
 
 # 1. SOZLAMALAR
-TOKEN = '8794780288:AAGekZmUAr5xHt1gbcryygaDq7mGRjRjzak'
+TOKEN ='8113580026:AAGDr8Cd6jT0-m7XoRZNIEt9qUHfCRD62qw'
 ADMIN_ID = 6971227691 
 KINO_KANAL_ID = -1003168624222  
 
