@@ -3,24 +3,24 @@
 from flask import Flask
 from threading import Thread
 
-# 1. BOT SOZLAMALARI
+# 1. SOZLAMALAR
 TOKEN = '8794780288:AAEwpwNo2Ytxm9dd7VehGFY1xdvqOKsQXmw'
-ADMIN_ID = 6971227691  # Sizning ID raqamingiz
+ADMIN_ID = 6971227691 
 KINO_KANAL_ID = -1003168624222  
 
 bot = telebot.TeleBot(TOKEN)
 CHANNELS = ["@polatkino_uz"]
 
-# 2. RENDER UCHUN SAYTCHA
+# 2. RENDER UCHUN
 app = Flask('')
 @app.route('/')
 def home():
-    return "Bot ishlayapti!"
+    return "Bot is running!"
 
 def run():
     app.run(host='0.0.0.0', port=8080)
 
-# 3. OBUNANI TEKSHIRISH
+# 3. OBUNA TEKSHIRISH
 def check_sub(user_id):
     for channel in CHANNELS:
         try:
@@ -31,68 +31,56 @@ def check_sub(user_id):
             continue
     return True
 
-# 4. ADMIN PANEL (Yaxshilangan variant)
+# 4. ADMIN PANEL (ENG TEPAGA QO'YDIK)
 @bot.message_handler(commands=['panel'])
-def admin_panel(message):
-    # ID raqamingizni tekshirishni print orqali logga chiqaramiz (Render logsda ko'rish uchun)
-    print(f"Xabar keldi. User ID: {message.from_user.id}, Admin ID: {ADMIN_ID}")
-    
-    if int(message.from_user.id) == int(ADMIN_ID):
-        text = "⚙️ **ADMIN PANEL**\n\n"
-        text += "Hozirgi majburiy kanallar:\n"
+def send_panel(message):
+    if message.from_user.id == ADMIN_ID:
+        text = "⚙️ ADMIN PANEL\n\nMajburiy kanallar:\n"
         for ch in CHANNELS:
             text += f"🔹 {ch}\n"
-        text += "\n➕ Qo'shish: `/add @kanal`"
-        text += "\n➖ O'chirish: `/del @kanal`"
-        bot.send_message(message.chat.id, text, parse_mode="Markdown")
+        text += "\n➕ Qo'shish: /add @kanal\n➖ O'chirish: /del @kanal"
+        bot.send_message(message.chat.id, text)
     else:
-        bot.send_message(message.chat.id, "Siz admin emassiz! Sizning ID: " + str(message.from_user.id))
+        bot.send_message(message.chat.id, f"Siz admin emassiz. ID: {message.from_user.id}")
 
 @bot.message_handler(commands=['add'])
-def add_channel(message):
-    if int(message.from_user.id) == int(ADMIN_ID):
+def add_ch(message):
+    if message.from_user.id == ADMIN_ID:
         try:
             new_ch = message.text.split()[1]
-            if new_ch.startswith('@') and new_ch not in CHANNELS:
-                CHANNELS.append(new_ch)
-                bot.reply_to(message, f"✅ {new_ch} qo'shildi!")
+            CHANNELS.append(new_ch)
+            bot.reply_to(message, f"✅ {new_ch} qo'shildi")
         except:
-            bot.reply_to(message, "Xato! `/add @kanal` shaklida yozing.")
+            bot.reply_to(message, "Xato yozdingiz")
 
 @bot.message_handler(commands=['del'])
-def del_channel(message):
-    if int(message.from_user.id) == int(ADMIN_ID):
+def del_ch(message):
+    if message.from_user.id == ADMIN_ID:
         try:
             old_ch = message.text.split()[1]
             if old_ch in CHANNELS:
                 CHANNELS.remove(old_ch)
-                bot.reply_to(message, f"❌ {old_ch} o'chirildi!")
+                bot.reply_to(message, f"❌ {old_ch} o'chirildi")
         except:
-            bot.reply_to(message, "Xato! `/del @kanal` shaklida yozing.")
+            bot.reply_to(message, "Xato yozdingiz")
 
-# 5. ASOSIY QIDIRUV
+# 5. BOSHQALAR
 @bot.message_handler(commands=['start'])
-def start(message):
+def welcome(message):
     bot.send_message(message.chat.id, "🎬 Salom! Kino kodini yuboring.")
 
 @bot.message_handler(func=lambda m: True)
-def get_kino(message):
-    # Majburiy obuna tekshiruvi
+def get_movie(message):
     if not check_sub(message.from_user.id):
-        btn = telebot.types.InlineKeyboardMarkup()
-        for ch in CHANNELS:
-            btn.add(telebot.types.InlineKeyboardButton(text="A'zo bo'lish", url=f"https://t.me/{ch[1:]}"))
-        bot.send_message(message.chat.id, "❌ Kanalga a'zo bo'ling!", reply_markup=btn)
+        bot.send_message(message.chat.id, "❌ Kanallarga a'zo bo'ling: " + ", ".join(CHANNELS))
         return
 
-    # Kino yuborish
     if message.text.isdigit():
         try:
             bot.forward_message(message.chat.id, KINO_KANAL_ID, int(message.text))
         except:
-            bot.send_message(message.chat.id, "😔 Kino topilmadi.")
+            bot.send_message(message.chat.id, "Kino topilmadi.")
 
 if __name__ == "__main__":
     Thread(target=run).start()
     bot.polling(none_stop=True)
-
