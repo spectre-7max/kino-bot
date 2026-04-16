@@ -2,175 +2,169 @@ import telebot
 from flask import Flask
 from threading import Thread
 import os
+import time
+import sqlite3
+from datetime import datetime
 
 # 1. SOZLAMALAR
-# Token va ID'larni o'zingizniki bilan tekshiring
 TOKEN = '8113580026:AAGDr8Cd6jT0-m7XoRZNIEt9qUHfCRD62qw'
 ADMIN_ID = 6971227691
-KINO_KANAL_ID = -1003168624222 # Kinolar yuklangan kanal IDsi
+KINO_KANAL_ID = -1003168624222 
 
-bot = telebot.TeleBot(TOKEN)
-CHANNELS = ["@polatkino_uz"] # Boshlang'ich kanal
+# Botni ko'p tarmoqli (multithreading) rejimida yoqish
+bot = telebot.TeleBot(TOKEN, threaded=True, num_threads=20)
+CHANNELS = ["@polatkino_uz"]
 
-# 2. WEB SERVER (Render uchun)
-app = Flask('')
+# 2. MA'LUMOTLAR BAZASI BILAN ISHLASH
+def init_db():
+    conn = sqlite3.connect("users.db")
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY, 
+            joined_at DATE
+        )
+    """)
+    conn.commit()
+    conn.close()
 
-@app.route('/')
-def home():
-    return "Bot 24/7 rejimida ishlayapti!"
-
-def run():
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
-
-# 3. FOYDALANUVCHILAR BAZASI BILAN ISHLASH
 def save_user(user_id):
-    user_id = str(user_id)
-    if not os.path.exists("users.txt"):
-        with open("users.txt", "w") as f:
-            f.write("")
-    
-    with open("users.txt", "r") as f:
-        users = f.read().splitlines()
-    
-    if user_id not in users:
-        with open("users.txt", "a") as f:
-            f.write(user_id + "\n")
+    try:
+        conn = sqlite3.connect("users.db")
+        cursor = conn.cursor()
+        today = datetime.now().strftime('%Y-%m-%d')
+        cursor.execute("INSERT OR IGNORE INTO users (user_id, joined_at) VALUES (?, ?)", (user_id, today))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Baza xatosi: {e}")
+
+# 3. AVTOMATIK HISOBOT VA BAZA NUSXASI (BACKUP)
+def auto_tasks_loop():
+    while True:
+        now = datetime.now()
+        # Har kuni tungi 00:00 da ishlaydi
+        if now.hour == 00 and now.minute == 00:
+            try:
+                conn = sqlite3.connect("users.db")
+                cursor = conn.cursor()
+                
+                # Jami soni
+                cursor.execute("SELECT COUNT(*) FROM users")
+                total = cursor.fetchone()[0]
+                
+                # Bugungi yangi odamlar
+                today_str = now.strftime('%Y-%m-%d')
+                cursor.execute("SELECT COUNT(*) FROM users WHERE joined_at = ?", (today_str,))
+                today_count = cursor.fetchone()[0]
+                conn.close()
+
+                # 1. Hisobot yuborish
+                report = f"📊 **KUNLIK HISOBOT**\n\n👤 Bugun qo'shildi: {today_count}\n👥 Jami: {total}"
+                bot.send_message(ADMIN_ID, report, parse_mode="Markdown")
+
+                # 2. Baza nusxasini yuborish (Render'da o'chib ketish xavfi uchun)
+                with open("users.db", "rb") as doc:
+                    bot.send_document(ADMIN_ID, doc, caption=f"💾 Baza nusxasi: {today_str}")
+                
+                time.sleep(65) # Qayta ishlamasligi uchun 1 minut kutish
+            except Exception as e:
+                print(f"Avto-vazifa xatosi: {e}")
+        
+        time.sleep(30)
 
 # 4. OBUNA TEKSHIRISH
 def check_sub(user_id):
     for channel in CHANNELS:
         try:
             status = bot.get_chat_member(channel, user_id).status
-            if status in ['left', 'kicked']:
-                return False
-        except:
-            # Agar bot kanal admini bo'lmasa yoki kanal topilmasa
-            return False
+            if status in ['left', 'kicked']: return False
+        except: return False
     return True
 
-# 5. ADMIN PANEL (KOMANDALAR)
-@bot.message_handler(commands=['panel'])
-def admin_panel(message):
-    if message.from_user.id == ADMIN_ID:
-        text = "⚙️ **ADMIN PANELIGA XUSH KELIBSIZ**\n\n"
-        text += "📢 **Hozirgi kanallar:**\n"
-        for ch in CHANNELS:
-            text += f"🔹 {ch}\n"
-        text += "\n➕ Qo'shish: `/add @kanal`"
-        text += "\n➖ O'chirish: `/del @kanal`"
-        text += "\n✉️ Reklama yuborish: `/send`"
-        bot.send_message(message.chat.id, text, parse_mode="Markdown")
+# 5. REKLAMA (ALOHIDA OQIMDA)
+def broadcast_worker(message):
+    conn = sqlite3.connect("users.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT user_id FROM users")
+    users = cursor.fetchall()
+    conn.close()
 
-@bot.message_handler(commands=['add'])
-def add_channel(message):
-    if message.from_user.id == ADMIN_ID:
+    bot.send_message(ADMIN_ID, f"🚀 Reklama {len(users)} kishiga yuborilmoqda...")
+    c, e = 0, 0
+    for (u_id,) in users:
         try:
-            new_ch = message.text.split()[1]
-            if new_ch.startswith('@'):
-                if new_ch not in CHANNELS:
-                    CHANNELS.append(new_ch)
-                    bot.reply_to(message, f"✅ {new_ch} ro'yxatga qo'shildi!")
-                else:
-                    bot.reply_to(message, "Bu kanal allaqachon mavjud.")
-            else:
-                bot.reply_to(message, "Xato! Kanal nomi @ bilan boshlanishi kerak.")
-        except:
-            bot.reply_to(message, "Format: `/add @kanal`")
+            bot.copy_message(u_id, message.chat.id, message.message_id)
+            c += 1
+            time.sleep(0.05) # Telegram limitidan oshmaslik uchun
+        except: e += 1
+    bot.send_message(ADMIN_ID, f"✅ Reklama tugadi!\n\nYetkazildi: {c}\nBlok: {e}")
 
-@bot.message_handler(commands=['del'])
-def del_channel(message):
-    if message.from_user.id == ADMIN_ID:
-        try:
-            ch = message.text.split()[1]
-            if ch in CHANNELS:
-                CHANNELS.remove(ch)
-                bot.reply_to(message, f"❌ {ch} o'chirildi!")
-            else:
-                bot.reply_to(message, "Kanal topilmadi.")
-        except:
-            bot.reply_to(message, "Format: `/del @kanal`")
-
-# 6. REKLAMA TARQATISH (FAQAT ADMIN UCHUN)
-@bot.message_handler(commands=['send'])
-def send_ad_request(message):
-    if message.from_user.id == ADMIN_ID:
-        msg = bot.send_message(message.chat.id, "Barcha foydalanuvchilarga yuboriladigan xabarni yuboring (Rasm, matn, video yoki post):")
-        bot.register_next_step_handler(msg, start_broadcasting)
-    else:
-        bot.reply_to(message, "❌ Bu buyruq faqat bot admini uchun!")
-
-def start_broadcasting(message):
-    if not os.path.exists("users.txt"):
-        bot.send_message(ADMIN_ID, "Baza bo'sh!")
-        return
-
-    with open("users.txt", "r") as f:
-        users = f.read().splitlines()
-
-    bot.send_message(ADMIN_ID, f"🚀 Tarqatish boshlandi (Jami: {len(users)} ta)...")
-    
-    count = 0
-    error = 0
-    for user in users:
-        try:
-            bot.copy_message(user, message.chat.id, message.message_id)
-            count += 1
-        except:
-            error += 1
-    
-    bot.send_message(ADMIN_ID, f"📢 **Xabar tarqatish tugadi!**\n\n✅ Yetkazildi: {count}\n❌ Bloklaganlar: {error}")
-
-# 7. FOYDALANUVCHI QISMI
+# 6. KOMANDALAR VA HANDLERLAR
 @bot.message_handler(commands=['start'])
 def start(message):
     save_user(message.from_user.id)
-    bot.send_message(
-        message.chat.id, 
-        f"🎬 Salom {message.from_user.first_name}!\nKino kodini yuboring, men sizga kinoni topib beraman."
-    )
+    bot.send_message(message.chat.id, f"🎬 Salom {message.from_user.first_name}!\nKino kodini yuboring:")
+
+@bot.message_handler(commands=['stat'])
+def get_stat(message):
+    if message.from_user.id == ADMIN_ID:
+        conn = sqlite3.connect("users.db")
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM users")
+        total = cursor.fetchone()[0]
+        conn.close()
+        bot.reply_to(message, f"📊 Bazadagi jami foydalanuvchilar: {total} ta")
+
+@bot.message_handler(commands=['send'])
+def send_ad(message):
+    if message.from_user.id == ADMIN_ID:
+        msg = bot.send_message(message.chat.id, "Reklama postini yuboring (text, rasm, video):")
+        bot.register_next_step_handler(msg, lambda m: Thread(target=broadcast_worker, args=(m,)).start())
 
 @bot.callback_query_handler(func=lambda call: call.data == "check_sub")
 def check_callback(call):
     if check_sub(call.from_user.id):
         bot.delete_message(call.message.chat.id, call.message.message_id)
-        bot.send_message(call.message.chat.id, "✅ Tasdiqlandi! Kino kodini yuboring:")
+        bot.send_message(call.message.chat.id, "✅ Rahmat! Endi kino kodini yuborishingiz mumkin:")
     else:
-        bot.answer_callback_query(call.id, "❌ Siz hali kanallarga a'zo bo'lmadingiz!", show_alert=True)
+        bot.answer_callback_query(call.id, "❌ Siz hali a'zo bo'lmadingiz!", show_alert=True)
 
 @bot.message_handler(func=lambda m: True)
-def handle_message(message):
-    # Har doim foydalanuvchini bazaga tekshirib qo'shamiz
+def handle_msg(message):
     save_user(message.from_user.id)
-
-    # Obunani tekshirish
     if not check_sub(message.from_user.id):
         markup = telebot.types.InlineKeyboardMarkup()
         for ch in CHANNELS:
-            markup.add(telebot.types.InlineKeyboardButton(text=f"A'zo bo'lish ({ch})", url=f"https://t.me/{ch[1:]}"))
+            markup.add(telebot.types.InlineKeyboardButton(text=f"Kanalga a'zo bo'lish", url=f"https://t.me/{ch[1:]}"))
         markup.add(telebot.types.InlineKeyboardButton(text="✅ Tasdiqlash", callback_data="check_sub"))
-        
-        bot.send_message(
-            message.chat.id, 
-            "⚠️ Botdan foydalanish uchun quyidagi kanallarga a'zo bo'lishingiz shart:", 
-            reply_markup=markup
-        )
+        bot.send_message(message.chat.id, "⚠️ Botdan foydalanish uchun quyidagi kanallarga a'zo bo'lishingiz shart:", reply_markup=markup)
         return
 
-    # Kino kodini tekshirish
     if message.text.isdigit():
         try:
-            # Kinoni forward emas, COPY qilish (chiroyli chiqadi)
             bot.copy_message(message.chat.id, KINO_KANAL_ID, int(message.text))
         except:
-            bot.send_message(message.chat.id, "😔 Afsuski, bu kod bo'yicha kino topilmadi.")
+            bot.send_message(message.chat.id, "😔 Bu kodga mos kino topilmadi.")
     else:
-        bot.send_message(message.chat.id, "🔢 Iltimos, faqat kino kodini (raqam) yuboring.")
+        bot.send_message(message.chat.id, "🔢 Iltimos, faqat kino kodini yuboring.")
 
-# 8. ISHGA TUSHIRISH
+# 7. RENDER UCHUN WEB SERVER
+app = Flask('')
+@app.route('/')
+def home(): return "Bot is Online"
+def run_web(): app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
+
 if __name__ == "__main__":
-    # Web serverni alohida thread'da boshlaymiz
-    t = Thread(target=run)
-    t.start()
+    init_db()
+    Thread(target=run_web).start()
+    Thread(target=auto_tasks_loop).start()
     
-    print("Bot muvaffaqiyatli ishga tushdi!")
-    bot.infinity_polling()
+    print("Bot muvaffaqiyatli yoqildi!")
+    
+    while True:
+        try:
+            bot.infinity_polling(timeout=10, long_polling_timeout=5)
+        except Exception as e:
+            print(f"Polling xatosi: {e}")
+            time.sleep(10)
